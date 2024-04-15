@@ -1,0 +1,19 @@
+Sure, here are the MySQL table creation queries:
+
+```sql
+CREATE TABLE taskstatus (
+    status_id INT PRIMARY KEY AUTO_INCREMENT,
+    status_name VARCHAR(20)
+);
+
+CREATE TABLE report (
+    report_id INT PRIMARY KEY AUTO_INCREMENT,
+    assignment_id INT,
+    title VARCHAR(255),
+    comments TEXT,
+    status_id INT,
+    FOREIGN KEY (status_id) REFERENCES taskstatus(status_id)
+);
+```
+
+These queries create two tables: `taskstatus` and `report`. The `taskstatus` table has columns `status_id` and `status_name`, and the `report` table has columns `report_id`, `assignment_id`, `title`, `comments`, and `status_id`. The `status_id` column in the `report` table is a foreign key referencing the `status_id` column in the `taskstatus` table.
