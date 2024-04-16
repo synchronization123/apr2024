@@ -1,0 +1,501 @@
+<?php
+session_start();
+require_once('dbconnect.php');
+
+// Function to display error message
+function displayError($message) {
+    echo '<div class="alert alert-danger">' . $message . '</div>';
+}
+
+// Fetch task statuses from the database
+$queryStatus = "SELECT * FROM taskstatus";
+$stmtStatus = $conn->prepare($queryStatus);
+$stmtStatus->execute();
+$resultStatus = $stmtStatus->get_result();
+
+// Store the statuses in an array
+$taskStatuses = array();
+while($rowStatus = $resultStatus->fetch_assoc()) {
+    $taskStatuses[$rowStatus['status_id']] = $rowStatus['status_name'];
+}
+
+// Fetch JIRA types from the database
+$queryJiraType = "SELECT * FROM jira_types";
+$stmtJiraType = $conn->prepare($queryJiraType);
+$stmtJiraType->execute();
+$resultJiraType = $stmtJiraType->get_result();
+
+// Store the JIRA types in an array
+$jiraTypes = array();
+while($rowJiraType = $resultJiraType->fetch_assoc()) {
+    $jiraTypes[$rowJiraType['jira_type_id']] = $rowJiraType['jira_type'];
+}
+
+// Fetch Sonar types from the database
+$querySonarType = "SELECT * FROM sonar_types";
+$stmtSonarType = $conn->prepare($querySonarType);
+$stmtSonarType->execute();
+$resultSonarType = $stmtSonarType->get_result();
+
+// Store the Sonar types in an array
+$sonarTypes = array();
+while($rowSonarType = $resultSonarType->fetch_assoc()) {
+    $sonarTypes[$rowSonarType['sonar_type_id']] = $rowSonarType['sonar_type_name'];
+}
+
+// Fetch Contrast types from the database
+$queryContrastType = "SELECT * FROM contrast_types";
+$stmtContrastType = $conn->prepare($queryContrastType);
+$stmtContrastType->execute();
+$resultContrastType = $stmtContrastType->get_result();
+
+// Store the Contrast types in an array
+$contrastTypes = array();
+while($rowContrastType = $resultContrastType->fetch_assoc()) {
+    $contrastTypes[$rowContrastType['contrast_type_id']] = $rowContrastType['contrast_type_name'];
+}
+
+// Fetch DepCheck types from the database
+$queryDepcheckType = "SELECT * FROM depcheck_types";
+$stmtDepcheckType = $conn->prepare($queryDepcheckType);
+$stmtDepcheckType->execute();
+$resultDepcheckType = $stmtDepcheckType->get_result();
+
+// Store the DepCheck types in an array
+$depcheckTypes = array();
+while($rowDepcheckType = $resultDepcheckType->fetch_assoc()) {
+    $depcheckTypes[$rowDepcheckType['depcheck_type_id']] = $rowDepcheckType['depcheck_type_name'];
+}
+
+// Fetch Manual types from the database
+$queryManualType = "SELECT * FROM manual_types";
+$stmtManualType = $conn->prepare($queryManualType);
+$stmtManualType->execute();
+$resultManualType = $stmtManualType->get_result();
+
+// Store the Manual types in an array
+$manualTypes = array();
+while($rowManualType = $resultManualType->fetch_assoc()) {
+    $manualTypes[$rowManualType['manual_type_id']] = $rowManualType['manual_type_name'];
+}
+
+// Fetch Coereview types from the database
+$queryCoereviewType = "SELECT * FROM coereview_types";
+$stmtCoereviewType = $conn->prepare($queryCoereviewType);
+$stmtCoereviewType->execute();
+$resultCoereviewType = $stmtCoereviewType->get_result();
+
+// Store the Coereview types in an array
+$coereviewTypes = array();
+while($rowCoereviewType = $resultCoereviewType->fetch_assoc()) {
+    $coereviewTypes[$rowCoereviewType['coereview_type_id']] = $rowCoereviewType['coereview_type_name'];
+}
+
+// Check if columns already exist in the report table
+$checkColumnsQuery = "SELECT * FROM information_schema.columns WHERE table_name = 'report' AND (column_name = 'created_at' OR column_name = 'username')";
+$stmtColumns = $conn->prepare($checkColumnsQuery);
+$stmtColumns->execute();
+$resultColumns = $stmtColumns->get_result();
+
+// If columns don't exist, add them
+if($resultColumns->num_rows === 0) {
+    // SQL to alter schema and add timestamp and username columns
+    $alterSchemaQuery = "ALTER TABLE report
+        ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ADD COLUMN username VARCHAR(255)";
+    $conn->query($alterSchemaQuery); // Execute ALTER statement
+}
+
+// Delete report if delete button is clicked and confirmed
+if(isset($_GET['delete']) && isset($_GET['report_id'])) {
+    $report_id = $_GET['report_id'];
+    // Check if confirmation is received
+    if(isset($_GET['confirm'])) {
+        // If confirmed, proceed with deletion
+        $queryDelete = "DELETE FROM report WHERE report_id=?";
+        $stmtDelete = $conn->prepare($queryDelete);
+        $stmtDelete->bind_param("i", $report_id); // "i" indicates integer type for the report_id
+
+        if($stmtDelete->execute()) {
+            // Report deleted successfully
+            echo '<div class="alert alert-success">Report deleted successfully!</div>';
+            // Redirect back to the current assignment_id in URL
+            if(isset($_SESSION['assignment_id'])) {
+                header("Location: {$_SERVER['PHP_SELF']}?assignment_id={$_SESSION['assignment_id']}");
+                exit();
+            }
+        } else {
+            // Error in deleting report
+            displayError('Error: Unable to delete report. ' . $stmtDelete->error);
+        }
+    } else {
+        // If not confirmed, redirect back to the page without deletion
+        header("Location: {$_SERVER['PHP_SELF']}?delete=true&report_id=$report_id&confirm=false");
+        exit();
+    }
+}
+
+// Fetch assignment_id from URL if available
+if(isset($_GET['assignment_id'])) {
+    $_SESSION['assignment_id'] = $_GET['assignment_id'];
+}
+
+// Handle report editing
+if(isset($_POST['edit_report_id']) && isset($_POST['edit_jira_id']) && isset($_POST['edit_comments']) && isset($_POST['edit_status']) && isset($_POST['edit_jira_type']) && isset($_POST['edit_sonar_id']) && isset($_POST['edit_contrast_id']) && isset($_POST['edit_depcheck_id']) && isset($_POST['edit_manual_id']) && isset($_POST['edit_coereview_id'])) {
+    $report_id = $_POST['edit_report_id'];
+    $jira_id = $_POST['edit_jira_id'];
+    $comments = $_POST['edit_comments'];
+    $status_id = $_POST['edit_status'];
+    $jira_type_id = $_POST['edit_jira_type'];
+    $sonar_id = $_POST['edit_sonar_id'];
+    $contrast_id = $_POST['edit_contrast_id'];
+    $depcheck_id = $_POST['edit_depcheck_id'];
+    $manual_id = $_POST['edit_manual_id'];
+    $coereview_id = $_POST['edit_coereview_id'];
+
+    // Update the report with the new values
+    $queryUpdate = "UPDATE report SET jira_id=?, comments=?, status_id=?, jira_type_id=?, sonar_id=?, contrast_id=?, depcheck_id=?, manual_id=?, coereview_id=? WHERE report_id=?";
+    $stmtUpdate = $conn->prepare($queryUpdate);
+    $stmtUpdate->bind_param("ssiiiiiiii", $jira_id, $comments, $status_id, $jira_type_id, $sonar_id, $contrast_id, $depcheck_id, $manual_id, $coereview_id, $report_id);
+
+    if($stmtUpdate->execute()) {
+        // Report updated successfully
+        echo '<div class="alert alert-success">Report updated successfully!</div>';
+    } else {
+        // Error in updating report
+        displayError('Error: Unable to update report. ' . $stmtUpdate->error);
+    }
+}
+
+// Handle report creation
+if(isset($_POST['jira_id']) && isset($_POST['comments']) && isset($_POST['status']) && isset($_POST['jira_type']) && isset($_POST['sonar_id']) && isset($_POST['contrast_id']) && isset($_POST['depcheck_id']) && isset($_POST['manual_id']) && isset($_POST['coereview_id'])) {
+    $jira_id = $_POST['jira_id'];
+    $comments = $_POST['comments'];
+    $status_id = $_POST['status'];
+    $jira_type_id = $_POST['jira_type'];
+    $sonar_id = $_POST['sonar_id'];
+    $contrast_id = $_POST['contrast_id'];
+    $depcheck_id = $_POST['depcheck_id'];
+    $manual_id = $_POST['manual_id'];
+    $coereview_id = $_POST['coereview_id'];
+    $username = isset($_SESSION['username']) ? $_SESSION['username'] : 'Unknown'; // Get username from session, or default to 'Unknown'
+
+    if(isset($_SESSION['assignment_id'])) {
+        $assignment_id = $_SESSION['assignment_id'];
+
+        // Insert data into the report table with assignment_id, status_id, and username
+        $queryInsert = "INSERT INTO report (assignment_id, jira_id, comments, status_id, jira_type_id, sonar_id, contrast_id, depcheck_id, manual_id, coereview_id, created_at, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)";
+        $stmtInsert = $conn->prepare($queryInsert);
+        $stmtInsert->bind_param("isssiiiiiss", $assignment_id, $jira_id, $comments, $status_id, $jira_type_id, $sonar_id, $contrast_id, $depcheck_id, $manual_id, $coereview_id, $username);
+
+        try {
+            if($stmtInsert->execute()) {
+                // Data saved successfully
+                echo '<div class="alert alert-success">Data saved successfully!</div>';
+            } else {
+                // Error in saving data
+                displayError('Error: Unable to save data. ' . $stmtInsert->error);
+            }
+        } catch (mysqli_sql_exception $e) {
+            // Catch foreign key constraint error
+            if (strpos($e->getMessage(), 'foreign key constraint fails') !== false) {
+                displayError('Error: This assignment ID or status ID does not exist.');
+            } else {
+                displayError('Error: ' . $e->getMessage());
+            }
+        }
+    } else {
+        // No assignment_id set
+        displayError('Error: No assignment ID set.');
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Report</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script>
+        function confirmDelete(report_id) {
+            if(confirm("Are you sure you want to delete this report?")) {
+                window.location.href = `?delete=true&report_id=${report_id}&confirm=true`;
+            }
+        }
+
+        function editReport(report_id, jira_id, comments, status_id, jira_type_id, sonar_id, contrast_id, depcheck_id, manual_id, coereview_id) {
+            document.getElementById('edit_report_id').value = report_id;
+            document.getElementById('edit_jira_id').value = jira_id;
+            document.getElementById('edit_comments').value = comments;
+            document.getElementById('edit_status').value = status_id;
+            document.getElementById('edit_jira_type').value = jira_type_id;
+            document.getElementById('edit_sonar_id').value = sonar_id;
+            document.getElementById('edit_contrast_id').value = contrast_id;
+            document.getElementById('edit_depcheck_id').value = depcheck_id;
+            document.getElementById('edit_manual_id').value = manual_id;
+            document.getElementById('edit_coereview_id').value = coereview_id;
+            $('#editModal').modal('show');
+        }
+    </script>
+    <style>
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #jiralist, #jiralist * {
+                visibility: visible;
+            }
+            #jiralist {
+                position: absolute;
+                left: 0;
+                top: 0;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            img {
+                width: 200px;
+                height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Create Report</h2>
+        <form method="POST" action="">
+            <div class="form-group">
+                <label for="jira_id">JIRA ID:</label>
+                <input type="text" class="form-control" id="jira_id" name="jira_id" required>
+            </div>
+            <div class="form-group">
+                <label for="comments">Comments:</label>
+                <textarea class="form-control" id="comments" name="comments" rows="5" required></textarea>
+            </div>
+            <div class="form-group">
+                <label for="status">Status:</label>
+                <select class="form-control" id="status" name="status" required>
+                    <option value="">Select Status</option>
+                    <?php
+                    // Populate dropdown options with task statuses
+                    foreach($taskStatuses as $status_id => $status_name) {
+                        echo '<option value="' . $status_id . '">' . $status_name . '</option>';
+                    }
+                    ?>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="jira_type">JIRA Type:</label>
+                <select class="form-control" id="jira_type" name="jira_type" required>
+                    <option value="">Select JIRA Type</option>
+                    <?php
+                    // Populate dropdown options with JIRA types
+                    foreach($jiraTypes as $jira_type_id => $jira_type_name) {
+                        echo '<option value="' . $jira_type_id . '">' . $jira_type_name . '</option>';
+                    }
+                    ?>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sonar_type_id">Sonar:</label>
+                <select class="form-control" id="sonar_type_id" name="sonar_type_id" required>
+                    <option value="">Select Sonar</option>
+                    <?php
+                    foreach ($sonarOptions as $id => $name) {
+                        echo '<option value="' . $id . '">' . $name . '</option>';
+                    }
+                    ?>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="contrast_id">Contrast ID:</label>
+                <input type="text" class="form-control" id="contrast_id" name="contrast_id" required>
+            </div>
+            <div class="form-group">
+                <label for="depcheck_id">DepCheck ID:</label>
+                <input type="text" class="form-control" id="depcheck_id" name="depcheck_id" required>
+            </div>
+            <div class="form-group">
+                <label for="manual_id">Manual ID:</label>
+                <input type="text" class="form-control" id="manual_id" name="manual_id" required>
+            </div>
+            <div class="form-group">
+                <label for="coereview_id">Coereview ID:</label>
+                <input type="text" class="form-control" id="coereview_id" name="coereview_id" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+
+        <hr>
+        <div class="container mt-3" id="jiralist">
+            <h3>Reports</h3>
+            <table id="patch" class="table">
+                <thead>
+                    <tr>
+                        <th>JIRA ID</th>
+                        <th>Comments</th>
+                        <th>Status</th>
+                        <th>JIRA Type</th>
+                        <th>Sonar ID</th>
+                        <th>Contrast ID</th>
+                        <th>DepCheck ID</th>
+                        <th>Manual ID</th>
+                        <th>Coereview ID</th>
+                        <th>Created At</th>
+                        <th>Username</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    // Fetch reports for the current assignment_id
+                    if(isset($_SESSION['assignment_id'])) {
+                        $assignment_id = $_SESSION['assignment_id'];
+                        $query = "SELECT * FROM report WHERE assignment_id=?";
+                        $stmt = $conn->prepare($query);
+                        $stmt->bind_param("i", $assignment_id);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+
+                        if($result->num_rows > 0) {
+                            while($row = $result->fetch_assoc()) {
+                                echo '<tr>';
+                                echo '<td>' . $row['jira_id'] . '</td>';
+                                echo '<td>' . $row['comments'] . '</td>';
+                                // Check if status_id exists in the $taskStatuses array before accessing its name
+                                $status_name = isset($taskStatuses[$row['status_id']]) ? $taskStatuses[$row['status_id']] : 'Unknown';
+                                echo '<td>' . $status_name . '</td>';
+                                // Check if jira_type_id exists in the $jiraTypes array before accessing its name
+                                
+								$jira_type_name = isset($jiraTypes[$row['jira_type_id']]) ? $jiraTypes[$row['jira_type_id']] : 'Unknown';
+                                echo '<td>' . $jira_type_name . '</td>';
+											
+							$sonar_type_name = isset($sonarTypes[$row['sonar_type_id']]) ? $sonarTypes[$row['sonar_type_id']] : 'Unknown';
+                                echo '<td>' . $sonar_type_name . '</td>';
+												
+											
+											
+											
+                             //   echo '<td>' . $row['sonar_type_id'] . '</td>';
+								
+								
+								
+								
+								
+                                echo '<td>' . $row['contrast_type_id'] . '</td>';
+                                echo '<td>' . $row['depcheck_type_id'] . '</td>';
+                                echo '<td>' . $row['manual_type_id'] . '</td>';
+                                echo '<td>' . $row['coereview_type_id'] . '</td>';
+                                echo '<td>' . $row['created_at'] . '</td>';
+                                echo '<td>' . $row['username'] . '</td>';
+                                echo '<td>';
+                                echo '<button class="btn btn-primary" onclick="editReport(' . $row['report_id'] . ', \'' . $row['jira_id'] . '\', \'' . $row['comments'] . '\', ' . $row['status_id'] . ', ' . $row['jira_type_id'] . ', ' . $row['sonar_id'] . ', ' . $row['contrast_id'] . ', ' . $row['depcheck_id'] . ', ' . $row['manual_id'] . ', ' . $row['coereview_id'] . ')">Edit</button>';
+                                echo ' <button class="btn btn-danger" onclick="confirmDelete(' . $row['report_id'] . ')">Delete</button>';
+                                echo '</td>';
+                                echo '</tr>';
+                            }
+                        } else {
+                            echo '<tr><td colspan="12">No reports found.</td></tr>';
+                        }
+                    } else {
+                        echo '<tr><td colspan="12">No assignment ID set.</td></tr>';
+                    }
+                    ?>
+                </tbody>
+            </table>
+            <button onclick="window.print()" class="btn btn-secondary">Print Preview</button>
+        </div>
+    </div>
+
+    <!-- Edit Report Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1" role="dialog" aria-labelledby="editModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editModalLabel">Edit Report</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form method="POST" action="">
+                        <input type="hidden" id="edit_report_id" name="edit_report_id">
+                        <div class="form-group">
+                            <label for="edit_jira_id">JIRA ID:</label>
+                            <input type="text" class="form-control" id="edit_jira_id" name="edit_jira_id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_comments">Comments:</label>
+                            <textarea class="form-control" id="edit_comments" name="edit_comments" rows="5" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_status">Status:</label>
+                            <select class="form-control" id="edit_status" name="edit_status" required>
+                                <option value="">Select Status</option>
+                                <?php
+                                // Populate dropdown options with task statuses
+                                foreach($taskStatuses as $status_id => $status_name) {
+                                    echo '<option value="' . $status_id . '">' . $status_name . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_jira_type">JIRA Type:</label>
+                            <select class="form-control" id="edit_jira_type" name="edit_jira_type" required>
+                                <option value="">Select JIRA Type</option>
+                                <?php
+                                // Populate dropdown options with JIRA types
+                                foreach($jiraTypes as $jira_type_id => $jira_type_name) {
+                                    echo '<option value="' . $jira_type_id . '">' . $jira_type_name . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+						
+						
+						
+                        <div class="form-group">
+                            <label for="edit_sonar_id">Sonar ID:</label>
+                            <input type="text" class="form-control" id="edit_sonar_id" name="edit_sonar_id" required>
+                        </div>
+						
+						
+						
+						
+						
+                        <div class="form-group">
+                            <label for="edit_contrast_id">Contrast ID:</label>
+                            <input type="text" class="form-control" id="edit_contrast_id" name="edit_contrast_id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_depcheck_id">DepCheck ID:</label>
+                            <input type="text" class="form-control" id="edit_depcheck_id" name="edit_depcheck_id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_manual_id">Manual ID:</label>
+                            <input type="text" class="form-control" id="edit_manual_id" name="edit_manual_id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_coereview_id">Coereview ID:</label>
+                            <input type="text" class="form-control" id="edit_coereview_id" name="edit_coereview_id" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
